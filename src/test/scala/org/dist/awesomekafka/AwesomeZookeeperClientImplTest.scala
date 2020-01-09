@@ -23,7 +23,7 @@ class AwesomeZookeeperClientImplTest extends ZookeeperTestHarness {
 
   test("should be notified when new brokers are added") {
     val zookeeperClient = new AwesomeZookeeperClientImpl(zkClient)
-    val controller = new AwesomeKafkaController(zookeeperClient)
+    val controller = new AwesomeKafkaController(zookeeperClient,1)
     val brokerChangeListener = new AwesomeBrokerChangeListener(controller,zookeeperClient)
 
     controller.onBecomingLeader()

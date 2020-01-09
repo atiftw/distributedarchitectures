@@ -1,15 +1,17 @@
 package org.dist.awesomekafka
 
-import org.I0Itec.zkclient.{IZkChildListener, ZkClient}
-import org.I0Itec.zkclient.exception.ZkNoNodeException
+import org.I0Itec.zkclient.{IZkChildListener, IZkDataListener, ZkClient}
+import org.I0Itec.zkclient.exception.{ZkNoNodeException, ZkNodeExistsException}
 import org.dist.kvstore.JsonSerDes
 import org.dist.queue.utils.ZkUtils.Broker
+import org.dist.simplekafka.{Controller, ControllerExistsException}
 
 import scala.jdk.CollectionConverters._
 
 
 trait AwesomeZookeeperClient {
   val BrokerIdsPath = "/brokers/ids"
+  val ControllerPath = "/controller"
 
   def getAllBrokerIds(): Set[Int]
 
@@ -20,6 +22,21 @@ trait AwesomeZookeeperClient {
 }
 
 private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) extends AwesomeZookeeperClient {
+  def subscribeControllerChangeListener(controller: AwesomeKafkaController) = {
+    zkClient.subscribeDataChanges(ControllerPath, new AwesomeControllerChangeListener(controller))
+  }
+
+  def tryCreatingControllerPath(leaderId: String) = {
+    try {
+      createEphemeralPath(zkClient, ControllerPath, leaderId)
+    } catch {
+      case e:ZkNodeExistsException => {
+        val existingControllerId:String = zkClient.readData(ControllerPath)
+        throw new ControllerExistsException(existingControllerId)
+      }
+    }
+  }
+
 
   def registerBroker(broker: Broker): Unit = {
     val brokerData = JsonSerDes.serialize(broker)
@@ -27,6 +44,17 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
     createEphemeralPath(zkClient, brokerPath, brokerData)
   }
 
+
+  class AwesomeControllerChangeListener(controller:AwesomeKafkaController) extends IZkDataListener {
+    override def handleDataChange(dataPath: String, data: Any): Unit = {
+      val existingControllerId:String = zkClient.readData(dataPath)
+      controller.setCurrent(existingControllerId.toInt)
+    }
+
+    override def handleDataDeleted(dataPath: String): Unit = {
+      controller.elect()
+    }
+  }
 
   override def getAllBrokerIds(): Set[Int] = {
     zkClient.getChildren(BrokerIdsPath).asScala.map(_.toInt).toSet
