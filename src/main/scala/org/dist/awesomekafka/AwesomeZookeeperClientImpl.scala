@@ -1,6 +1,6 @@
 package org.dist.awesomekafka
 
-import org.I0Itec.zkclient.ZkClient
+import org.I0Itec.zkclient.{IZkChildListener, ZkClient}
 import org.I0Itec.zkclient.exception.ZkNoNodeException
 import org.dist.kvstore.JsonSerDes
 import org.dist.queue.utils.ZkUtils.Broker
@@ -16,6 +16,7 @@ trait AwesomeZookeeperClient {
   def getBrokerPath(id: Int) = {
     s"$BrokerIdsPath/$id"
   }
+  def subscribeBrokerChangeListener(listener: IZkChildListener): Option[List[String]]
 }
 
 private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) extends AwesomeZookeeperClient {
@@ -56,5 +57,10 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
     val parentDir = path.substring(0, path.lastIndexOf('/'))
     if (parentDir.length != 0)
       client.createPersistent(parentDir, true)
+  }
+
+  override def subscribeBrokerChangeListener(listener: IZkChildListener): Option[List[String]] = {
+    val result = zkClient.subscribeChildChanges(BrokerIdsPath, listener)
+    Option(result).map(_.asScala.toList)
   }
 }

@@ -1,7 +1,9 @@
 package org.dist.awesomekafka
 
+import org.I0Itec.zkclient.{IZkChildListener, ZkClient}
 import org.dist.queue.{TestUtils, ZookeeperTestHarness}
 import org.dist.queue.utils.ZkUtils.Broker
+import org.mockito.Mockito
 
 class AwesomeZookeeperClientImplTest extends ZookeeperTestHarness {
 
@@ -11,7 +13,6 @@ class AwesomeZookeeperClientImplTest extends ZookeeperTestHarness {
     val zookeeperClient = new AwesomeZookeeperClientImpl(zkClient)
     brokers.foreach(zookeeperClient.registerBroker)
 
-
     TestUtils.waitUntilTrue(() => zookeeperClient.getAllBrokers().size == 10,"Timeout!",1000)
     zookeeperClient.getAllBrokers().foreach { broker =>
       assertResult(s"10.10.10.${10 + broker.id}")(broker.host)
@@ -20,5 +21,11 @@ class AwesomeZookeeperClientImplTest extends ZookeeperTestHarness {
 
   }
 
-
+  test("should be notified when new brokers are added") {
+    val zookeeperClient = new AwesomeZookeeperClientImpl(zkClient)
+    val brokerChangeListener = new AwesomeBrokerChangeListener
+    zookeeperClient.subscribeBrokerChangeListener(brokerChangeListener)
+    brokers.foreach(zookeeperClient.registerBroker)
+    TestUtils.waitUntilTrue(() => brokerChangeListener.liveBrokers.size == 10,"TOut!",20000)
+  }
 }
