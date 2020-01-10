@@ -1,20 +1,87 @@
 package org.dist.awesomekafka
 
+import java.util
+import java.util.concurrent.atomic.AtomicInteger
+
+import com.google.common.annotations.VisibleForTesting
+import org.dist.awesomekafka.TopicChangeMetadata._
+import org.dist.kvstore.JsonSerDes
+import org.dist.queue.api.{RequestKeys, RequestOrResponse}
+import org.dist.queue.common.TopicAndPartition
 import org.dist.queue.utils.ZkUtils.Broker
 
-case class ControllerExistsException(controllerId:String) extends RuntimeException
+import scala.jdk.CollectionConverters._
 
-class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, brokerId: Int){
+case class ControllerExistsException(controllerId: String) extends RuntimeException
+
+class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, brokerId: Int) {
   def setCurrent(existingControllerId: Int): Unit = {
     this.currentLeader = existingControllerId
   }
 
 
   var currentLeader = -1
-  var liveBrokers  = Set[Broker]()
+  var liveBrokers = Set[Broker]()
+  val correlationId = new AtomicInteger(0)
+
+  def onTopicChange(topicName: String, partitionReplicas: Seq[PartitionReplicas]) = {
+    val leaderAndReplicas = selectLeaderAndFollowerBrokersForPartitions(topicName, partitionReplicas)
+    //This is persisted in zookeeper for failover.. we are just keeping it in memory for now.
+
+    sendLeaderAndReplicaRequestToAllLeadersAndFollowersForGivenPartition(leaderAndReplicas, partitionReplicas)
+    sendUpdateMetadataRequestToAllLiveBrokers(leaderAndReplicas)
+
+  }
+
+  private def selectLeaderAndFollowerBrokersForPartitions(topicName: String, partitionReplicas: Seq[PartitionReplicas]) = {
+    val leaderAndReplicas: Seq[LeaderAndReplicas] = partitionReplicas.map(p => {
+      val leaderBrokerId = p.brokerIds.head //This is where leader for particular partition is selected
+      val leaderBroker = getBroker(leaderBrokerId)
+      val replicaBrokers = p.brokerIds.map(id ⇒ getBroker(id))
+      LeaderAndReplicas(TopicAndPartition(topicName, p.partitionId), PartitionInfo(leaderBroker, replicaBrokers))
+    })
+    leaderAndReplicas
+  }
+
+  private def getBroker(brokerId: Int) = {
+    liveBrokers.find(b ⇒ b.id == brokerId).get
+  }
+
+  private def sendUpdateMetadataRequestToAllLiveBrokers(leaderAndReplicas: Seq[LeaderAndReplicas]) = {
+    val brokerListToIsrRequestMap =
+      liveBrokers.foreach(broker ⇒ {
+        val updateMetadataRequest = UpdateMetadataRequest(liveBrokers.toList, leaderAndReplicas.toList)
+        val request = RequestOrResponse(RequestKeys.UpdateMetadataKey, JsonSerDes.serialize(updateMetadataRequest), correlationId.incrementAndGet())
+        //      socketServer.sendReceiveTcp(request, InetAddressAndPort.create(broker.host, broker.port)) TODO
+      })
+  }
+
+  @VisibleForTesting
+  def sendLeaderAndReplicaRequestToAllLeadersAndFollowersForGivenPartition(leaderAndReplicas: Seq[LeaderAndReplicas], partitionReplicas: Seq[PartitionReplicas]) = {
+    val brokerToLeaderIsrRequest = new util.HashMap[Broker, java.util.List[LeaderAndReplicas]]()
+    leaderAndReplicas.foreach(lr ⇒ {
+      lr.partitionStateInfo.allReplicas.foreach(broker ⇒ {
+        var leaderReplicas = brokerToLeaderIsrRequest.get(broker)
+        if (leaderReplicas == null) {
+          leaderReplicas = new util.ArrayList[LeaderAndReplicas]()
+          brokerToLeaderIsrRequest.put(broker, leaderReplicas)
+        }
+        leaderReplicas.add(lr)
+      })
+    })
+
+    val brokers = brokerToLeaderIsrRequest.keySet().asScala
+    for (broker ← brokers) {
+      val leaderAndReplicas: java.util.List[LeaderAndReplicas] = brokerToLeaderIsrRequest.get(broker)
+      val leaderAndReplicaRequest = LeaderAndReplicaRequest(leaderAndReplicas.asScala.toList)
+      val request = RequestOrResponse(RequestKeys.LeaderAndIsrKey, JsonSerDes.serialize(leaderAndReplicaRequest), correlationId.getAndIncrement())
+      //      socketServer.sendReceiveTcp(request, InetAddressAndPort.create(broker.host, broker.port))
+    }
+  }
 
   def startup(): Unit = {
     zookeeperClient.subscribeControllerChangeListener(this)
+    zookeeperClient.subscribeTopicChangeListener(new AwesomeTopicChangeHandler(zookeeperClient, onTopicChange))
     elect()
   }
 
@@ -30,7 +97,7 @@ class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, broker
     }
   }
 
-  def onBecomingLeader(){
-    zookeeperClient.subscribeBrokerChangeListener(new AwesomeBrokerChangeListener(this,zookeeperClient))
+  def onBecomingLeader() {
+    zookeeperClient.subscribeBrokerChangeListener(new AwesomeBrokerChangeListener(this, zookeeperClient))
   }
 }

@@ -4,7 +4,7 @@ import org.I0Itec.zkclient.exception.{ZkNoNodeException, ZkNodeExistsException}
 import org.I0Itec.zkclient.{IZkChildListener, IZkDataListener, ZkClient}
 import org.dist.kvstore.JsonSerDes
 import org.dist.queue.utils.ZkUtils.Broker
-import org.dist.awesomekafka.{ControllerExistsException,PartitionReplicas}
+import org.dist.awesomekafka.{ControllerExistsException, PartitionReplicas}
 
 import scala.jdk.CollectionConverters._
 
@@ -13,6 +13,7 @@ trait AwesomeZookeeperClient {
   val BrokerIdsPath = "/brokers/ids"
   val ControllerPath = "/controller"
   val TopicsPath = "/topics"
+  val BrokerTopicsPath = "/brokers/topics"
 
   def getAllBrokerIds(): Set[Int]
 
@@ -82,6 +83,11 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
   }
 
 
+  def subscribeTopicChangeListener(listener: IZkChildListener): Option[List[String]] = {
+    val result = zkClient.subscribeChildChanges(BrokerTopicsPath, listener)
+    Option(result).map(_.asScala.toList)
+  }
+
   def createEphemeralPath(client: ZkClient, path: String, data: String): Unit = {
     try {
       client.createEphemeral(path, data)
@@ -127,5 +133,4 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
 
   override def getPartitionAssignmentsFor(topicName: String): List[PartitionReplicas] = ???
 
-  override def subscribeTopicChangeListener(listener: IZkChildListener): Option[List[String]] = ???
 }
