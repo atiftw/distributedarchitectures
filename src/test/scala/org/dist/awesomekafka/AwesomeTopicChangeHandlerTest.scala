@@ -8,8 +8,9 @@ import org.dist.util.Networks
 class AwesomeTopicChangeHandlerTest extends ZookeeperTestHarness {
 
   class TestContext {
-    var replicas:Seq[PartitionReplicas] = List()
-    def leaderAndIsr(topicName:String, replicas:Seq[PartitionReplicas]) = {
+    var replicas: Seq[PartitionReplicas] = List()
+
+    def leaderAndIsr(topicName: String, replicas: Seq[PartitionReplicas]) = {
       this.replicas = replicas
     }
   }

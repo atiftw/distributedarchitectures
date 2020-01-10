@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import com.google.common.annotations.VisibleForTesting
 import org.dist.awesomekafka.TopicChangeMetadata._
-import org.dist.kvstore.JsonSerDes
+import org.dist.kvstore.{InetAddressAndPort, JsonSerDes}
 import org.dist.queue.api.{RequestKeys, RequestOrResponse}
 import org.dist.queue.common.TopicAndPartition
 import org.dist.queue.utils.ZkUtils.Broker
@@ -14,7 +14,7 @@ import scala.jdk.CollectionConverters._
 
 case class ControllerExistsException(controllerId: String) extends RuntimeException
 
-class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, brokerId: Int) {
+class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, brokerId: Int, socketServer: SimpleSocketServer) {
   def setCurrent(existingControllerId: Int): Unit = {
     this.currentLeader = existingControllerId
   }
@@ -52,7 +52,7 @@ class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, broker
       liveBrokers.foreach(broker ⇒ {
         val updateMetadataRequest = UpdateMetadataRequest(liveBrokers.toList, leaderAndReplicas.toList)
         val request = RequestOrResponse(RequestKeys.UpdateMetadataKey, JsonSerDes.serialize(updateMetadataRequest), correlationId.incrementAndGet())
-        //      socketServer.sendReceiveTcp(request, InetAddressAndPort.create(broker.host, broker.port)) TODO
+        socketServer.sendReceiveTcp(request, InetAddressAndPort.create(broker.host, broker.port))
       })
   }
 
@@ -75,7 +75,7 @@ class AwesomeKafkaController(zookeeperClient: AwesomeZookeeperClientImpl, broker
       val leaderAndReplicas: java.util.List[LeaderAndReplicas] = brokerToLeaderIsrRequest.get(broker)
       val leaderAndReplicaRequest = LeaderAndReplicaRequest(leaderAndReplicas.asScala.toList)
       val request = RequestOrResponse(RequestKeys.LeaderAndIsrKey, JsonSerDes.serialize(leaderAndReplicaRequest), correlationId.getAndIncrement())
-      //      socketServer.sendReceiveTcp(request, InetAddressAndPort.create(broker.host, broker.port))
+      socketServer.sendReceiveTcp(request, InetAddressAndPort.create(broker.host, broker.port))
     }
   }
 

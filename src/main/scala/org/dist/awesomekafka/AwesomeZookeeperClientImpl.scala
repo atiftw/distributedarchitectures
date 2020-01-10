@@ -1,10 +1,11 @@
 package org.dist.awesomekafka
 
+import com.fasterxml.jackson.core.`type`.TypeReference
 import org.I0Itec.zkclient.exception.{ZkNoNodeException, ZkNodeExistsException}
 import org.I0Itec.zkclient.{IZkChildListener, IZkDataListener, ZkClient}
 import org.dist.kvstore.JsonSerDes
+import org.dist.queue.common.Logging
 import org.dist.queue.utils.ZkUtils.Broker
-import org.dist.awesomekafka.{ControllerExistsException, PartitionReplicas}
 
 import scala.jdk.CollectionConverters._
 
@@ -12,7 +13,7 @@ import scala.jdk.CollectionConverters._
 trait AwesomeZookeeperClient {
   val BrokerIdsPath = "/brokers/ids"
   val ControllerPath = "/controller"
-  val TopicsPath = "/topics"
+  val TopicsPath = "/brokers/topics"
   val BrokerTopicsPath = "/brokers/topics"
 
   def getAllBrokerIds(): Set[Int]
@@ -34,7 +35,7 @@ trait AwesomeZookeeperClient {
   def tryCreatingControllerPath(data: String): Unit
 }
 
-private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) extends AwesomeZookeeperClient {
+private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) extends AwesomeZookeeperClient with Logging {
   def subscribeControllerChangeListener(controller: AwesomeKafkaController) = {
     zkClient.subscribeDataChanges(ControllerPath, new AwesomeControllerChangeListener(controller))
   }
@@ -85,6 +86,7 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
 
   def subscribeTopicChangeListener(listener: IZkChildListener): Option[List[String]] = {
     val result = zkClient.subscribeChildChanges(BrokerTopicsPath, listener)
+    debug(s"Subscribed to listen to message at path:$BrokerTopicsPath")
     Option(result).map(_.asScala.toList)
   }
 
@@ -115,6 +117,7 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
   override def setPartitionReplicasForTopic(topicName: String, partitionReplicas: Set[PartitionReplicas]) = {
     val topicsPath = getTopicPath(topicName)
     val topicsData = JsonSerDes.serialize(partitionReplicas)
+    debug(s"Setting partition replicas for $topicName with partitionReplicas: \n $partitionReplicas")
     createPersistentPath(zkClient, topicsPath, topicsData)
   }
 
@@ -131,6 +134,9 @@ private[awesomekafka] class AwesomeZookeeperClientImpl(zkClient: ZkClient) exten
 
   override def registerSelf(): Unit = ???
 
-  override def getPartitionAssignmentsFor(topicName: String): List[PartitionReplicas] = ???
+  override def getPartitionAssignmentsFor(topicName: String): List[PartitionReplicas] = {
+    val partitionAssignments: String = zkClient.readData(getTopicPath(topicName))
+    JsonSerDes.deserialize[List[PartitionReplicas]](partitionAssignments.getBytes, new TypeReference[List[PartitionReplicas]]() {})
+  }
 
 }
